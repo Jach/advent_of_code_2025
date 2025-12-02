@@ -1,3 +1,4 @@
 (defpackage #:com.thejach.aoc25
-  (:use #:cl))
+  (:use #:cl)
+  (:shadow #://))
 

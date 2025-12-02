@@ -51,6 +51,9 @@
 
 ;;;; day 2
 
+(defun // (a b)
+  (truncate (/ a b)))
+
 ;; part 1
 
 (defun ids-from-range-str (range-str)
@@ -64,7 +67,7 @@
   (loop for id in ids
         for id-str = (format nil "~a" id)
         for id-str-len = (length id-str)
-        for half-len = (truncate (/ id-str-len 2))
+        for half-len = (// id-str-len 2)
         when (string-equal (subseq id-str 0 half-len)
                            (subseq id-str half-len))
         collect id))
@@ -86,9 +89,9 @@
         collect id))
 
 (defun any-twice-repeating? (id-str)
-  (loop for substr-end from 1 to (truncate (/ (length id-str) 2))
+  (loop for substr-end from 1 to (// (length id-str) 2)
         for substr = (subseq id-str 0 substr-end)
-        for chars-left = (truncate (/ (length id-str) substr-end))
+        for chars-left = (// (length id-str) substr-end)
         for repeated-str = (str:repeat chars-left substr)
         ;do
         ;(format t "substr ~a repeated ~a ~a~%" substr chars-left repeated-str)
