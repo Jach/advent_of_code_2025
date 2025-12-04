@@ -195,11 +195,96 @@
 
 ; omfg that's ugly...
 
+(setf lparallel:*kernel* (lparallel:make-kernel 24))
+
 (eval-when (:execute)
   (best-twelves (first (puzzle-lines *day3-sample*)))
   (best-twelves (first (puzzle-lines *day3-input*)))
-  (setf lparallel:*kernel* (lparallel:make-kernel 24))
   (time (let ((results (lparallel:pmap 'list #'best-twelves (puzzle-lines *day3-input*))))
           (reduce #'+ results)))
   ; 61 seconds....
   )
+
+
+;;;; day 4
+
+;; part 1
+
+(defun what-at (lines row col)
+  (let ((cell (elt (elt lines row) col)))
+    (case cell
+      (#\. :empty)
+      (#\@ :paper))))
+
+(defun make-grid (rows cols lines)
+  (let ((grid (make-array (list rows cols))))
+    (loop for row below rows do
+          (loop for col below cols do
+                (setf (aref grid row col) (what-at lines row col))))
+    grid))
+
+(defun within-bounds? (cell bounds)
+  (let ((r1 (first cell))
+        (c1 (second cell))
+        (r2 (first bounds))
+        (c2 (second bounds)))
+    (and (<= 0 r1 (1- r2))
+         (<= 0 c1 (1- c2)))))
+
+(defun neighbors (grid cell)
+  "Given (r c) cell, return list of 8 ( (r1 c1) ...) neighbor cells including diagonals, so long as they're also in bounds."
+  (let* ((dims (array-dimensions grid))
+         (r (first cell))
+         (c (second cell))
+         (west (list r (1- c)))
+         (east (list r (1+ c)))
+         (north (list (1- r) c))
+         (south (list (1+ r) c))
+         (ne (list (1- r) (1+ c)))
+         (nw (list (1- r) (1- c)))
+         (se (list (1+ r) (1+ c)))
+         (sw (list (1+ r) (1- c))))
+    (remove-if-not (lambda (el) (within-bounds? el dims))
+                   (list north south east west ne nw se sw))))
+
+(let* ((lines (puzzle-lines *day4-input*))
+       (grid-rows (length lines))
+       (grid-cols (length (first lines)))
+       (grid (make-grid grid-rows grid-cols lines))
+       (accessible 0))
+  (loop for row below grid-rows do
+        (loop for col below grid-cols do
+              (when (eql :paper (aref grid row col))
+                (let* ((neighbors (neighbors grid (list row col)))
+                       (paper-neighbors (count :paper (mapcar (lambda (cell) (aref grid (first cell) (second cell))) neighbors))))
+                  ;(format t "at r=~a c=~a, neighbors=~a and paper count=~a~%" row col neighbors paper-neighbors)
+                  (when (< paper-neighbors 4)
+                    (incf accessible))))))
+  accessible)
+
+
+;; part 2
+
+(defun removal-pass (grid)
+  "Destructively modifies grid to remove paper that is accessible. Returns the number of papers removed."
+  (let* ((dims (array-dimensions grid))
+         (rows (first dims))
+         (cols (second dims))
+         (removed 0))
+    (loop for row below rows do
+          (loop for col below cols do
+                (when (eql :paper (aref grid row col))
+                  (let* ((neighbors (neighbors grid (list row col)))
+                         (paper-neighbors (count :paper (mapcar (lambda (cell) (aref grid (first cell) (second cell))) neighbors))))
+                    (when (< paper-neighbors 4)
+                      (setf (aref grid row col) :removed)
+                      (incf removed))))))
+    removed))
+
+(let* ((lines (puzzle-lines *day4-input*))
+       (grid-rows (length lines))
+       (grid-cols (length (first lines)))
+       (grid (make-grid grid-rows grid-cols lines)))
+  (loop for removed = (removal-pass grid)
+        until (zerop removed)
+        summing removed))
