@@ -1,5 +1,7 @@
 (in-package #:com.thejach.aoc25)
 
+;; note this file may be out of sync with main in the commit history during the event to avoid pushing puzzle inputs too soon as my compromise on the creator's strange request.. but the format is obvious, they're just pasted strings, no pre-processing
+
 (defvar *day1-sample* "
 L68
 L30
