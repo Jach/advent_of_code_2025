@@ -3,7 +3,7 @@
   :license "Public Domain/Unlicense"
 
   :depends-on ("cl-ppcre" "alexandria" "let-plus" "str"
-               "coalton" "lparallel")
+               "coalton" "lparallel" "lgame")
 
   :serial t
   :components ((:file "package")

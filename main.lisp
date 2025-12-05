@@ -3,6 +3,12 @@
 (defun puzzle-lines (input)
   (remove-if #'str:empty? (cl-ppcre:split "\\n" input)))
 
+(defmacro ns-time (&body form)
+  (let ((start (gensym)))
+    `(let ((,start (lgame.time:now-seconds)))
+       ,@form
+       (format t "Time: ~,6fms~%" (* 1e3 (- (lgame.time:now-seconds) ,start))))))
+
 ;; part 1
 (defun update-dial (val amount)
   (mod (+ val amount) 100))
@@ -288,3 +294,72 @@
   (loop for removed = (removal-pass grid)
         until (zerop removed)
         summing removed))
+
+
+;;;; day 5
+
+;; part 1
+
+(defun convert-fresh-ranges (ranges)
+  "List of ranges like 3-5, 10-14, etc. converted to vector of [a b] vectors with a/b being integers."
+  (map 'vector (lambda (range)
+                 (let* ((nums (cl-ppcre:split "-" range))
+                        (lower (parse-integer (first nums)))
+                        (upper (parse-integer (second nums))))
+                   (assert (<= lower upper))
+                   (vector lower upper)))
+       ranges))
+
+(defun fresh-id? (ranges id)
+  (loop for range across ranges
+        when (<= (aref range 0) id (aref range 1))
+        return t))
+
+(let* ((puzzle-parts (cl-ppcre:split "\\n\\n" *day5-input*))
+       (fresh-ranges (puzzle-lines (first puzzle-parts)))
+       (converted-fresh-ranges (convert-fresh-ranges fresh-ranges))
+       (available-ids (puzzle-lines (second puzzle-parts))))
+  (loop for available in available-ids
+        for id = (parse-integer available)
+        when (fresh-id? converted-fresh-ranges id)
+        sum 1))
+
+;; part 2
+
+(defun unseen-range-count (ranges current-range-id)
+  "Quadratic algorithm and fails if the ranges aren't sorted first."
+  (let* ((prev-range-id (1- current-range-id))
+         (range (aref ranges current-range-id))
+         (lower (aref range 0))
+         (upper (aref range 1)))
+    ; check lower against all previous range's lowers, then check upper, to get the new range (if any)
+    (loop for i from 0 to prev-range-id do
+          (let* ((prior-range (aref ranges i))
+                 (prior-lower (aref prior-range 0))
+                 (prior-upper (aref prior-range 1)))
+            (when (<= prior-lower lower prior-upper)
+              ; new lower is the older's upper + 1
+              (setf lower (1+ prior-upper))
+              (when (> lower upper) ; whole range was previously in former range
+                (return-from unseen-range-count 0)))
+            (when (<= prior-lower upper prior-upper)
+              (setf upper (1- prior-lower))
+              (when (< upper lower)
+                (return-from unseen-range-count 0)))))
+    (1+ (- upper lower))))
+
+(defun sort-ranges (ranges)
+  (sort ranges (lambda (a b)
+                 (let ((lower-a (aref a 0))
+                        (lower-b (aref b 0)))
+                    (if (= lower-a lower-b) ; sort on upper
+                        (< (aref a 1) (aref b 1))
+                        (< lower-a lower-b))))))
+
+; Still, under a ms...
+(ns-time
+(let* ((puzzle-parts (cl-ppcre:split "\\n\\n" *day5-input*))
+       (fresh-ranges (sort-ranges (convert-fresh-ranges (puzzle-lines (first puzzle-parts))))))
+  (loop for range-id below (length fresh-ranges)
+        sum (unseen-range-count fresh-ranges range-id)))
+)
