@@ -4,10 +4,16 @@
   (remove-if #'str:empty? (cl-ppcre:split "\\n" input)))
 
 (defmacro ns-time (&body form)
-  (let ((start (gensym)))
-    `(let ((,start (lgame.time:now-seconds)))
-       ,@form
-       (format t "Time: ~,6fms~%" (* 1e3 (- (lgame.time:now-seconds) ,start))))))
+  (let ((start (gensym))
+        (res (gensym))
+        (end (gensym)))
+    `(let* ((,start (lgame.time:now-seconds))
+            (,res ,@form)
+            (,end (lgame.time:now-seconds)))
+       (format t "Time: ~,3fms (~,3fus)~%" (* 1e3 (- ,end ,start))
+               (* 1e6 (- ,end ,start)))
+       ,res)))
+
 
 ;; part 1
 (defun update-dial (val amount)
@@ -363,3 +369,58 @@
   (loop for range-id below (length fresh-ranges)
         sum (unseen-range-count fresh-ranges range-id)))
 )
+
+
+;;;; day 6
+
+;; part 1
+
+(defun calc-sheet (sheet)
+  (let* ((rows (array-dimension sheet 0))
+         (cols (array-dimension sheet 1))
+         (ops (make-array cols :displaced-to sheet :displaced-index-offset (* (1- rows) cols))))
+    (loop for op across ops
+          for col below cols
+          sum (apply op (loop for row below (1- rows) collect (aref sheet row col))))))
+
+(let* ((lines (puzzle-lines *day6-input*))
+       (rows (length lines))
+       (cols (length (cl-ppcre:split "\\s+" (first lines))))
+       (sheet (make-array (list rows  cols))))
+  (loop for row below rows
+        for line in lines
+        for line-parts = (remove-if #'str:empty? (cl-ppcre:split "\\s+" line))
+        do
+        (loop for col below cols
+              for part in line-parts
+              do
+              (if (= row (1- rows))
+                  (setf part (case (char part 0) (#\+ #'+) (#\* #'*)))
+                  (setf part (parse-integer part)))
+              (setf (aref sheet row col) part)))
+  (calc-sheet sheet))
+
+;; part 2
+
+; ignore below fn, was from a failed approach, but may be useful for future.
+(defun transpose-matrix (matrix)
+  (let* ((rows (array-dimension matrix 0))
+         (cols (array-dimension matrix 1))
+         (transposed (make-array (list cols rows))))
+    (loop for i below rows do
+          (loop for j below cols do
+                (setf (aref transposed j i) (aref matrix i j))))
+    transposed))
+
+(let* ((lines (puzzle-lines *day6-input*))
+       (ops (mapcar (lambda (op) (case (char op 0) (#\+ #'+) (#\* #'*))) (cl-ppcre:split "\\s+" (first (last lines)))))
+       ; rtl-lines puts the nums we want to do ops on in the right order, followed by a string of only whitespace
+       (rtl-lines (apply #'map 'vector (lambda (&rest inputs) (coerce inputs 'string)) (butlast lines))))
+  (loop with set-idx = 0
+        for op in ops
+        for set-nums = (loop for i from set-idx
+                             until (or (>= i (length rtl-lines)) (str:empty? (str:trim (aref rtl-lines i))))
+                             collect (parse-integer (aref rtl-lines i) :junk-allowed t)
+                             do (incf set-idx))
+        sum (apply op set-nums)
+        do (incf set-idx)))
