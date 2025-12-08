@@ -142,6 +142,7 @@
 
 ;; part 2
 
+#|
 (defun best-twelves (bank)
   (let ((length (length bank))
         (best-2-digit 0)
@@ -204,7 +205,7 @@
                                                                                           (when (> joltage best)
                                                                                             (setf best joltage)))))))))))))))))))))))))))))))))))
     best))
-
+|#
 ; omfg that's ugly...
 
 (setf lparallel:*kernel* (lparallel:make-kernel 24))
@@ -424,3 +425,101 @@
                              do (incf set-idx))
         sum (apply op set-nums)
         do (incf set-idx)))
+
+;;;; day 7
+
+;; part 1
+
+(defun make-grid-from-lines (lines)
+  (let* ((rows (length lines))
+         (cols (length (first lines)))
+         (grid (make-array (list rows cols))))
+    (loop for row below rows do
+          (loop for col below cols do
+                (setf (aref grid row col) (elt (elt lines row) col))))
+    grid))
+
+(defun print-grid (grid)
+  (loop for row below (array-dimension grid 0) do
+        (loop for col below (array-dimension grid 1) do
+              (format t "~a" (aref grid row col)))
+        (format t "~%")))
+
+(defun array-row (array row)
+  (let ((cols (array-dimension array 1)))
+    (make-array cols :displaced-to array :displaced-index-offset (* row cols))))
+
+(let* ((grid (make-grid-from-lines (puzzle-lines *day7-input*)))
+       (start-pos (position #\S (array-row grid 0)))
+       (beam-positions (make-hash-table)) ; we'll store positions as keys, values are just a t to indicate presence. when a beam hits a splitter, we remove it from the position of the splitter (rem the hash entry) and add the appropriate new ones.
+       (beam-splits 0))
+  (setf (gethash start-pos beam-positions) t)
+  (loop for row-i from 1 below (array-dimension grid 0) do
+        (loop for pos in (alexandria:hash-table-keys beam-positions)
+              do
+              (when (eql #\. (aref grid row-i pos))
+                (setf (aref grid row-i pos) #\|))
+              (when (eql #\^ (aref grid row-i pos))
+                (remhash pos beam-positions)
+                (incf beam-splits)
+                (unless (gethash (1- pos) beam-positions)
+                  (setf (gethash (1- pos) beam-positions) t)
+                  (setf (aref grid row-i (1- pos)) #\|))
+                (unless (gethash (1+ pos) beam-positions)
+                  (setf (gethash (1+ pos) beam-positions) t)
+                  (setf (aref grid row-i (1+ pos)) #\|))
+                ))
+        ;(print-grid grid)
+        ;(format t "beam splits: ~a~%~%" beam-splits)
+        )
+  beam-splits)
+
+;; part 2
+
+(defun sum-paths (paths)
+  (loop for path being the hash-value of paths
+        sum (length path)))
+
+(let* ((grid (make-grid-from-lines (puzzle-lines *day7-sample*)))
+       (start-pos (position #\S (array-row grid 0)))
+       (beam-positions (make-hash-table)) ; we'll store positions as keys, values are just a t to indicate presence. when a beam hits a splitter, we remove it from the position of the splitter (rem the hash entry) and add the appropriate new ones.
+       (paths (make-hash-table)) ; here horizontal beam positions are also keys, but they don't necessarily indicate the splitter position itself, just the most recent position of a beam along a path. each value is a list of paths, built up iteratively.
+                                 ; the approach is to process a splitter, copy paths that led to it, remove them, then make two new paths, one for both sides of the splitter.
+                                 ; update: ok, using a list for each path-so-far is no good for perf. let's try making a chain of hashes instead. i.e. instead of (7) getting copied and becoming (6 7) and (8 7) at the first splitter, we start with (hash 7) and..? (hash (1- (hash 7))) etc?
+                                 )
+  (setf (gethash start-pos beam-positions) t)
+  (setf (gethash start-pos paths) (list (sxhash start-pos)))
+  (loop for row-i from 1 below (array-dimension grid 0) do
+        (loop for pos in (alexandria:hash-table-keys beam-positions)
+              do
+              (when (eql #\. (aref grid row-i pos))
+                (setf (aref grid row-i pos) #\|))
+              (when (eql #\^ (aref grid row-i pos))
+                (remhash pos beam-positions)
+                (unless (and nil (gethash (1- pos) beam-positions))
+                  (setf (gethash (1- pos) beam-positions) t)
+                  (setf (aref grid row-i (1- pos)) #\|))
+                (unless (and nil (gethash (1+ pos) beam-positions))
+                  (setf (gethash (1+ pos) beam-positions) t)
+                  (setf (aref grid row-i (1+ pos)) #\|))
+
+                (let ((paths-to-splitter (gethash pos paths)))
+                  (remhash pos paths)
+                  (loop for path in paths-to-splitter
+                        for new-path-l = (sxhash (1- path))
+                        for new-path-r = (sxhash (1+ path))
+                        do
+                        (setf (gethash (1- pos) paths) (push new-path-l (gethash (1- pos) paths)))
+                        (setf (gethash (1+ pos) paths) (push new-path-r (gethash (1+ pos) paths)))
+                        )
+                  ; cleanup, remove any duplicate paths
+;                  (setf (gethash (1- pos) paths) (remove-duplicates (gethash (1- pos) paths) :test #'equal))
+;                  (setf (gethash (1+ pos) paths) (remove-duplicates (gethash (1+ pos) paths) :test #'equal))
+                  )
+                ))
+        (sb-ext:gc :full t)
+        (format t "finished row ~a of ~a, paths so far: ~a~%" row-i (array-dimension grid 0) (sum-paths paths))
+        )
+  (sum-paths paths)
+  )
+
