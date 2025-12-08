@@ -486,9 +486,11 @@
        (paths (make-hash-table)) ; here horizontal beam positions are also keys, but they don't necessarily indicate the splitter position itself, just the most recent position of a beam along a path. each value is a list of paths, built up iteratively.
                                  ; the approach is to process a splitter, copy paths that led to it, remove them, then make two new paths, one for both sides of the splitter.
                                  ; update: ok, using a list for each path-so-far is no good for perf. let's try making a chain of hashes instead. i.e. instead of (7) getting copied and becoming (6 7) and (8 7) at the first splitter, we start with (hash 7) and..? (hash (1- (hash 7))) etc?
+                                 ; update2: ok it got further like that, but not good enough, need to prune paths along the way I think.
+                                 ; update3: what if I just store the count of paths?
                                  )
   (setf (gethash start-pos beam-positions) t)
-  (setf (gethash start-pos paths) (list (sxhash start-pos)))
+  (setf (gethash start-pos paths) (list (list start-pos)))
   (loop for row-i from 1 below (array-dimension grid 0) do
         (loop for pos in (alexandria:hash-table-keys beam-positions)
               do
@@ -506,20 +508,23 @@
                 (let ((paths-to-splitter (gethash pos paths)))
                   (remhash pos paths)
                   (loop for path in paths-to-splitter
-                        for new-path-l = (sxhash (1- path))
-                        for new-path-r = (sxhash (1+ path))
+                        for new-path-l = (cons (1- pos) path) ;(sxhash (1- path))
+                        for new-path-r = (cons (1+ pos) path) ;(sxhash (1+ path))
                         do
                         (setf (gethash (1- pos) paths) (push new-path-l (gethash (1- pos) paths)))
                         (setf (gethash (1+ pos) paths) (push new-path-r (gethash (1+ pos) paths)))
                         )
+                  ; there is probably a symmetry argument in here to keep the path count from exploding...
                   ; cleanup, remove any duplicate paths
-;                  (setf (gethash (1- pos) paths) (remove-duplicates (gethash (1- pos) paths) :test #'equal))
-;                  (setf (gethash (1+ pos) paths) (remove-duplicates (gethash (1+ pos) paths) :test #'equal))
+                  ;                  (setf (gethash (1- pos) paths) (remove-duplicates (gethash (1- pos) paths) :test #'equal))
+                  ;                  (setf (gethash (1+ pos) paths) (remove-duplicates (gethash (1+ pos) paths) :test #'equal))
                   )
                 ))
-        (sb-ext:gc :full t)
-        (format t "finished row ~a of ~a, paths so far: ~a~%" row-i (array-dimension grid 0) (sum-paths paths))
-        )
+        (when (evenp row-i)
+          (sb-ext:gc :full t)
+          (format t "finished row ~a of ~a, paths so far: ~a~%" row-i (array-dimension grid 0) (sum-paths paths))
+          (format t "they are: ~a~%" paths)
+          ))
   (sum-paths paths)
   )
 
