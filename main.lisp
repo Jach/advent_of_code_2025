@@ -7,12 +7,12 @@
   (let ((start (gensym))
         (res (gensym))
         (end (gensym)))
-    `(let* ((,start (lgame.time:now-seconds))
+    `(time (let* ((,start (lgame.time:now-seconds))
             (,res ,@form)
             (,end (lgame.time:now-seconds)))
        (format t "Time: ~,3fms (~,3fus)~%" (* 1e3 (- ,end ,start))
                (* 1e6 (- ,end ,start)))
-       ,res)))
+       ,res))))
 
 
 ;; part 1
@@ -364,12 +364,11 @@
                         (< lower-a lower-b))))))
 
 ; Still, under a ms...
-(ns-time
 (let* ((puzzle-parts (cl-ppcre:split "\\n\\n" *day5-input*))
        (fresh-ranges (sort-ranges (convert-fresh-ranges (puzzle-lines (first puzzle-parts))))))
   (loop for range-id below (length fresh-ranges)
         sum (unseen-range-count fresh-ranges range-id)))
-)
+
 
 
 ;;;; day 6
@@ -518,3 +517,61 @@
           ))
   (sum-paths2 paths)
   )
+
+
+;;;; day 8
+
+;; part 1
+
+; pulling in my union-find from https://gist.github.com/Jach/154764402816aac9d3bdce1e711925e2
+
+(defun distance (loc1 loc2)
+  #I( sqrt( (loc1[0] - loc2[0])^^2
+            + (loc1[1] - loc2[1])^^2
+            + (loc1[2] - loc2[2])^^2) ))
+
+(defun compute-all-distances (locations)
+  (let ((distances (make-hash-table :test #'equalp)))
+    (loop for i below (length locations)
+          do
+          (loop for j from (1+ i) below (length locations)
+                for distance = (distance (aref locations i) (aref locations j))
+                do
+                (setf (gethash (cons i j) distances) distance)))
+    (sort (alexandria:hash-table-alist distances)
+          (lambda (a b)
+            (< (cdr a) (cdr b))))))
+
+(let* ((lines (puzzle-lines *day8-input*))
+       (uf (make-instance 'union-find)) ; all connections
+       (locations (map 'vector (lambda (location) (coerce (mapcar #'parse-integer (cl-ppcre:split "," location)) 'vector)) lines))
+       (all-distances (compute-all-distances locations)))
+  (loop for ((a . b) . distance) in all-distances
+        for attempts from 0 below 1000
+        do
+        ;(format t "pair ~a -- ~a~%" (aref locations a) (aref locations b))
+        (when (not (uf-connected uf a b))
+          (uf-union uf a b)))
+  (reduce #'* (serapeum:take 3 (sort (alexandria:hash-table-values (uf-subtree-size-table uf)) #'>))))
+
+;; part 2
+
+(defun largest-component (uf)
+  (loop for v being the hash-value of (uf-subtree-size-table uf)
+        maximize v))
+
+(let* ((lines (puzzle-lines *day8-input*))
+       (uf (make-instance 'union-find)) ; all connections
+       (locations (map 'vector (lambda (location) (coerce (mapcar #'parse-integer (cl-ppcre:split "," location)) 'vector)) lines))
+       (all-distances (compute-all-distances locations))
+       (last-a nil)
+       (last-b nil))
+  (loop for ((a . b) . distance) in all-distances
+        until (= 1000 (largest-component uf))
+        do
+        (setf last-a a
+              last-b b)
+        (when (not (uf-connected uf a b))
+          (uf-union uf a b)))
+  (* (aref (aref locations last-a) 0)
+     (aref (aref locations last-b) 0)))
