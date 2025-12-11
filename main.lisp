@@ -968,75 +968,27 @@ non-negative integers."
 
 ;; part 2
 
-;; Currently unsolved, below is WIP.
+; woke up, was making it waaaay more complicated than it needed to be...
+; the issue is that my paths-to above is doing a full graph expansion iteratively.
+; but there was lots of re-counting of subgraphs.
+; it's easiest to just convert to a recursive solution, then memoize.
 
-(defstruct day11-node
-  node
-  seen-fft
-  seen-dac)
-
-(defun has-path-to (graph start goal)
-  "T if there is any path from start to goal in graph"
-  (let ((frontier (list start))
-        (seen (make-hash-table)))
-    (loop until (null frontier)
-          do
-          (let* ((top (pop frontier))
-                 (neighbors (gethash top graph)))
-            (setf (gethash top seen) t)
-            (when neighbors
-              (loop for neighbor across neighbors
-                    do
-                    (when (eql neighbor goal)
-                      (return-from has-path-to t))
-                    (unless (gethash neighbor seen)
-                      (push neighbor frontier))))))))
-
-(defun reachable-graph (graph target)
-  "For every root node in graph, return a map of node -> (has-path-to node target)"
-  (let ((result (make-hash-table)))
-    (loop for node being the hash-keys of graph
-          do
-          (setf (gethash node result) (has-path-to graph node target)))
-    result))
+(function-cache:defcached paths-to-memoized (graph from goal)
+  (let ((neighbors (gethash from graph))
+        (paths 0))
+    (when neighbors
+      (loop for neighbor across neighbors
+            do
+            (if (eql goal neighbor)
+                (incf paths 1)
+                (incf paths (paths-to-memoized graph neighbor goal)))))
+    paths))
 
 (defun day11-part2 ()
-  (let* ((graph (input-to-graph *day11-input*))
-         (nodes-can-reach-fft (reachable-graph graph :fft))
-         (nodes-can-reach-dac (reachable-graph graph :dac))
-         (start :svr)
-         (goal :out)
-         (computed-all (make-hash-table))
-         (frontier (list (make-day11-node :node start)))
-         (paths 0))
-    (loop until (null frontier)
-          do
-          (let* ((path-so-far (pop frontier))
-                 (neighbors (gethash (day11-node-node path-so-far) graph)))
-            (loop for neighbor across neighbors
-                  do
-                  (let ((new-path (make-day11-node :node neighbor :seen-fft (day11-node-seen-fft path-so-far) :seen-dac (day11-node-seen-dac path-so-far))))
-                    (when (eql :fft neighbor)
-                      (setf (day11-node-seen-fft new-path) t))
-                    (when (eql :dac neighbor)
-                      (setf (day11-node-seen-dac new-path) t))
-                    ;(format t "new-path ~a, can-fft ~a, can-dac ~a~%" new-path (gethash neighbor nodes-can-reach-fft) (gethash neighbor nodes-can-reach-dac))
-
-                    (if (and (day11-node-seen-fft new-path) (day11-node-seen-dac new-path))
-                        (progn (unless (gethash neighbor computed-all)
-                                 (setf (gethash neighbor computed-all) (paths-to graph neighbor goal)))
-                               (incf paths (gethash neighbor computed-all)))
-                        (when (not (eql goal neighbor)) (push new-path frontier)))
-                    ;(unless (and (and (not (gethash neighbor nodes-can-reach-fft)) (not (day11-node-seen-fft path-so-far)))
-                    ;             (and (not (gethash neighbor nodes-can-reach-dac)) (not (day11-node-seen-dac path-so-far))))
-                    ;  (if (eql goal neighbor)
-                    ;      (when (and (day11-node-seen-fft new-path) (day11-node-seen-dac new-path))
-                    ;        (incf paths))
-                    ;      (progn
-                    ;        ;(format t "  Adding new-path~%")
-                    ;        (push new-path frontier))))
-                    ))))
-    (format t "paths: ~a~%" paths)
-    paths)
-  )
-
+  ; noticed that there's no paths from :dac to :fft, so...
+  ; also note, paths are *multiplied*, not added!
+  (let ((graph (input-to-graph *day11-input*)))
+    (* (paths-to-memoized graph :svr :fft)
+       (paths-to-memoized graph :fft :dac)
+       (paths-to-memoized graph :dac :out))))
+(day11-part2)
