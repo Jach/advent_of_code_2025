@@ -575,3 +575,468 @@
           (uf-union uf a b)))
   (* (aref (aref locations last-a) 0)
      (aref (aref locations last-b) 0)))
+
+
+;;;; day 9
+
+;; part 1
+
+(defun area (c1 c2)
+  #I( (abs(c1[0] - c2[0])+1) * (abs(c1[1] - c2[1])+1) ))
+
+(defun compute-areas (locations)
+  (let ((areas (make-hash-table :test #'equalp)))
+    (loop for i below (length locations)
+          do
+          (loop for j from (1+ i) below (length locations)
+                do
+                (let ((c1 (aref locations i))
+                      (c2 (aref locations j)))
+                  (when (and (/= (aref c1 0) (aref c2 0))
+                             (/= (aref c1 1) (aref c2 1)))
+                    (setf (gethash (cons i j) areas) (area c1 c2))))))
+    (sort (alexandria:hash-table-alist areas)
+          (lambda (a b)
+            (> (cdr a) (cdr b))))))
+
+(let* ((lines (puzzle-lines *day9-input*))
+       (coords (map 'vector (lambda (coord) (map 'vector #'parse-integer (cl-ppcre:split "," coord))) lines))
+       (areas (compute-areas coords)))
+  (rest (first areas)))
+
+;; part 2
+
+(defun point-in-polygon? (point poly)
+  "Standard ray-casting approach to point in polygon (or on the boundary)"
+  (let ((x (aref point 0))
+        (y (aref point 1))
+        (inside? nil))
+    ; First check poly edges...
+    (loop for i below (1- (length poly))
+          for v1 = (aref poly i)
+          for v2 = (aref poly (1+ i))
+          for x1 = (aref v1 0)
+          for y1 = (aref v1 1)
+          for x2 = (aref v2 0)
+          for y2 = (aref v2 1)
+          do
+          (when (or (and (= x x1 x2) (<= (min y1 y2) y (max y1 y2))) ; along same vert edge
+                    (and (= y y1 y2) (<= (min x1 x2) x (max x1 x2)))) ; along same horiz edge
+            (return-from point-in-polygon? t)))
+
+    ; Now do ray casting:
+    ; we take the point and test against each vertical edge to see if it intersects at some x value.
+    ; if it does, it's crossing the boundary.
+    ; if it crosses an odd number of times, it's in the poly
+    (loop for i below (1- (length poly))
+          for v1 = (aref poly i)
+          for v2 = (aref poly (1+ i))
+          for x1 = (aref v1 0)
+          for y1 = (aref v1 1)
+          for x2 = (aref v2 0)
+          for y2 = (aref v2 1)
+          when (/= y1 y2) ; don't bother using horiz edges
+          do
+          (when (and (<= (min y1 y2) y (max y1 y2))
+                     (not (and (= y y1) (< y2 y1)))
+                     (not (and (= y y2) (< y1 y2))))
+            (let ((x-intersect (+ x1 (* (- x2 x1)
+                                        (/ (- y y1)
+                                           (float (- y2 y1)))))))
+              (when (< x x-intersect)
+                (setf inside? (not inside?))))))
+    inside?))
+
+(defun rectangle-in-polygon? (corners poly)
+  "Giving up... doing a very slow/dumb approach to this by checking ALL the points along the rect boundary.
+   Because the shape for this problem is evil, the two vert edges are more likely to intersect."
+  (let ((min-x (aref (aref corners 0) 0))
+        (min-y (aref (aref corners 0) 1))
+        (max-x (aref (aref corners 2) 0))
+        (max-y (aref (aref corners 2) 1)))
+
+    ; left edge, excluding corners to be checked on other edges
+    (loop for y from (1+ min-y) to (1- max-y)
+          unless (point-in-polygon? (vector min-x y) poly)
+          do (return-from rectangle-in-polygon? nil))
+
+    ; right edge, excluding corners
+    (loop for y from (1+ min-y) to (1- max-y)
+          unless (point-in-polygon? (vector max-x y) poly)
+          do (return-from rectangle-in-polygon? nil))
+
+    ; top edge
+    (loop for x from min-x to max-x
+          unless (point-in-polygon? (vector x min-y) poly)
+          do (return-from rectangle-in-polygon? nil))
+
+    ; bottom edge
+    (loop for x from min-x to max-x
+          unless (point-in-polygon? (vector x max-y) poly)
+          do (return-from rectangle-in-polygon? nil))
+
+    t))
+
+(defun group-seq (seq size)
+  "Partition / group sequence into subseqs of size size"
+  (let ((len (length seq)))
+    (loop for i below len by size
+          collect (subseq seq i (min (+ i size) len)))))
+
+(defun day9-part2 ()
+  (ns-time
+    (let* ((lines (puzzle-lines *day9-input*))
+           (coords (map 'vector
+                        (lambda (s) (map 'vector #'parse-integer (cl-ppcre:split "," s)))
+                        (append lines (list (first lines)))))
+           (areas (compute-areas (subseq coords 0 (1- (length coords))))))
+
+      (format t "Total rectangles to check: ~a~%" (length areas))
+      (format t "Polygon has ~a vertices~%" (length coords))
+
+      ;  (loop for ((a . b) . area) in areas
+      ;        for count from 1
+      ;        do
+      (loop for partitioned-areas in (group-seq (serapeum:drop 48000 areas) 1000) ; adjusted this manually to skip the first n large rects that I can tell from graphing them won't work
+            for counter from 0
+            do
+            (let ((big-area
+                    (lparallel:pmap-reduce (lambda (loc-area)
+                                             (let* ((ab (car loc-area))
+                                                    (area (cdr loc-area))
+                                                    (a (car ab))
+                                                    (b (cdr ab))
+                                                    (c1 (aref coords a))
+                                                    (c2 (aref coords b))
+                                                    (min-x (min (aref c1 0) (aref c2 0)))
+                                                    (min-y (min (aref c1 1) (aref c2 1)))
+                                                    (max-x (max (aref c1 0) (aref c2 0)))
+                                                    (max-y (max (aref c1 1) (aref c2 1)))
+                                                    (corners (vector (vector min-x min-y)
+                                                                     (vector max-x min-y)
+                                                                     (vector max-x max-y)
+                                                                     (vector min-x max-y))))
+                                               (if (rectangle-in-polygon? corners coords)
+                                                   (progn (format t "Found valid rectangle, area ~a, corners (~a,~a) to (~a,~a)~%"
+                                                                  area min-x min-y max-x max-y)
+                                                          area)
+                                                   (progn (format nil "Found invalid rectangle~%")
+                                                          0))))
+                                           #'max
+                                           partitioned-areas)))
+              (format t "Next partition... counter was ~a~%" counter)
+              (when (plusp big-area)
+                (return big-area))
+              )))))
+;(day9-part2)
+
+;;;; day 10
+
+;; part 1
+
+(defstruct factory-machine
+  indicator-lights
+  goal-lights
+  buttons
+  joltages)
+
+(defun get-machines (input)
+  (loop for machine in (puzzle-lines input)
+        collect
+        (cl-ppcre:register-groups-bind (lights buttons joltages) ("\\[(.+)\\] (.+) {(.+)}" machine)
+          (let ((indicator-lights (make-array (length lights) :initial-element nil))
+                (goal-lights (make-array (length lights) :initial-element nil))
+                (buttons-vec (map 'vector (lambda (btn)
+                                            (map 'vector #'parse-integer (cl-ppcre:split "," (cl-ppcre:regex-replace-all "\\(|\\)" btn ""))))
+                                  (cl-ppcre:split " " buttons)))
+                (goal-joltages (map 'vector #'parse-integer (cl-ppcre:split "," joltages))))
+            (loop for ind across lights
+                  for i from 0 do
+                  (setf (aref goal-lights i) (eql #\# ind)))
+            (make-factory-machine :indicator-lights indicator-lights :goal-lights goal-lights :buttons buttons-vec :joltages goal-joltages)))))
+
+
+(defun presses-for-machine (machine)
+  (let ((frontier (serapeum:queue (list 0 (factory-machine-indicator-lights machine))))
+        (visited (make-hash-table :test #'equalp)))
+    (loop until (zerop (serapeum:qlen frontier))
+          do
+          (let* ((top (serapeum:deq frontier))
+                 (presses (first top))
+                 (lights-state (second top)))
+            (setf (gethash lights-state visited) t)
+            ; otherwise, push modifications to it for each button
+            (loop for button across (factory-machine-buttons machine)
+                  do
+                  (let ((modified (make-array (length lights-state) :initial-contents lights-state)))
+                    (loop for light-id across button
+                          do
+                          (setf (aref modified light-id) (not (aref modified light-id))))
+                    (when (equalp modified (factory-machine-goal-lights machine))
+                      (return-from presses-for-machine (1+ presses)))
+                    (unless (gethash modified visited)
+                      (serapeum:enq (list (1+ presses) modified) frontier))))))))
+
+(defun day-10-part1 ()
+  (ns-time
+    (lparallel:pmap-reduce
+      #'presses-for-machine
+      #'+
+      (get-machines *day10-input*))
+    ))
+
+;(day-10-part1)
+
+;; part 2
+
+;; Unsolved so far.... below is WIP.
+
+(defun too-big-joltages (modified goal)
+  (some #'> modified goal))
+
+(defun joltage-presses-for-machine (machine)
+  (let ((frontier (serapeum:queue (list 0 (make-array (length (factory-machine-joltages machine)) :initial-element 0))))
+        (inspected 0)
+        (visited (make-hash-table :test #'equalp)))
+    (loop until (zerop (serapeum:qlen frontier))
+          do
+          (incf inspected)
+          (let* ((top (serapeum:deq frontier))
+                 (presses (first top))
+                 (jolts-state (second top)))
+            (setf (gethash jolts-state visited) t)
+            ; otherwise, push modifications to it for each button
+            (loop for button across (factory-machine-buttons machine)
+                  do
+                  (let ((modified (make-array (length jolts-state) :initial-contents jolts-state)))
+                    (loop for id across button
+                          do
+                          (incf (aref modified id)))
+                    (when (equalp modified (factory-machine-joltages machine))
+                      (return-from joltage-presses-for-machine (1+ presses)))
+                    (when (and (not (gethash modified visited))
+                               (not (too-big-joltages modified (factory-machine-joltages machine))))
+                      (serapeum:enq (list (1+ presses) modified) frontier))))))))
+
+; Idea: what if we use my A* path-finding code instead of the too-slow bfs?
+; Well my A* depended on being a grid... but I can rephrase this high-dimensional space into a 2d grid
+; or rather a 1d grid by converting each thing into a morton number.
+
+; https://www.thejach.com/view/2011/9/playing_with_morton_numbers
+
+; I asked an AI to help with the morton/inverse morton functions...
+
+(defun morton-number (coords)
+  "Return the LSB-first Morton number (Z-order curve) for COORDS,
+a vector or list of non-negative integers."
+  (let* ((coords (coerce coords 'vector))
+         (dims   (length coords))
+         ;; how many bits we need (max coordinate)
+         (max-bits
+           (if (zerop dims)
+               0
+               (integer-length
+                (reduce #'max coords)))))
+    (loop with result = 0
+          for bit from 0 below max-bits
+          do (loop for dim from 0 below dims
+                   for value = (aref coords dim)
+                   for bitval = (ldb (byte 1 bit) value)
+                   do (setf result
+                            (logior result
+                                    (ash bitval
+                                         (+ (* bit dims) dim)))))
+          finally (return result))))
+
+(defun inverse-morton (morton dims)
+  "Decode an LSB-first Morton number back into a vector of DIMS
+non-negative integers."
+  (let ((coords (make-array dims :initial-element 0)))
+    (loop
+      for morton-bit from 0 below (integer-length morton)
+      for bit = (floor morton-bit dims)
+      for dim = (mod morton-bit dims)
+      for bitval = (ldb (byte 1 morton-bit) morton)
+      do (when (plusp bitval)
+           (setf (aref coords dim)
+                 (logior (aref coords dim)
+                         (ash 1 bit)))))
+    coords))
+
+(defun day10-part2-doit (machine i mutex shared-total)
+  (let* ((buttons (factory-machine-buttons machine))
+         (goal-orig (factory-machine-joltages machine))
+         (goal (morton-number (factory-machine-joltages machine)))
+         (dims (length (factory-machine-joltages machine))))
+    (sb-thread:with-mutex (mutex)
+      (format t "Doing ~a, goal: ~a, dims: ~a, morton: ~a, inverse morton check: ~a~%" i goal-orig dims goal (inverse-morton goal dims)))
+    (let ((pathfinder (make-instance 'lgame.pathfinding:A*
+                                     :size (list 1 (1+ goal))
+                                     :sparse? t
+                                     :start-pos '(0 0)
+                                     :end-pos (list 0 goal)
+                                     :backing-collection :pileup-heap
+                                     :heuristic :manhattan
+                                     :heuristic-weight 0.8
+                                     :neighbor-fn (lambda (location)
+                                                    (let* ((col (second location))
+                                                           (mort-loc (inverse-morton col dims))
+                                                           (neighbors (loop for button across buttons
+                                                            for neighbor = (let ((modified (make-array dims :initial-contents mort-loc))
+                                                                                 (cost 1))
+                                                                             (loop for id across button
+                                                                                   do
+                                                                                   (incf (aref modified id)))
+                                                                             ; let's change the cost for each neighbor... let it be the sum of the distance between
+                                                                             ; each joltage slot? that way, if all slots but one are close, the neighbor that goes closer
+                                                                             ; to the not-close one will be slightly lower cost
+                                                                             (when (and (not (too-big-joltages modified goal-orig)) (<= (morton-number modified) goal))
+                                                                               (setf cost (reduce #'+ (map 'vector #'-  goal-orig modified)))
+                                                                               (list (list 0 (morton-number modified)) cost)))
+                                                            when neighbor
+                                                            collect neighbor)))
+                                                      (when (zerop (random 1000000))
+                                                      (format t "Considered ~a and doing neighbors ~a~%" mort-loc (mapcar (lambda (n) (list (second n) (inverse-morton (second (first n)) dims))) neighbors)))
+                                                      neighbors
+                                                    ))
+                                     )))
+      (let* ((compute (multiple-value-list (lgame.pathfinding:compute-path pathfinder)))
+             (exe-time (second compute))
+             (path-len (1- (length (lgame.pathfinding:shortest-path pathfinder)))))
+        (sb-thread:with-mutex (mutex)
+          (incf (first shared-total) path-len)
+          (format t "finished i=~a, m=~a, t=~,4fs, l=~a t=~a~%" i goal exe-time path-len (first shared-total)))))))
+
+(defun day10-part2 ()
+  (let ((total (list 0))
+        (machines (get-machines *day10-input*))
+        (mutex (sb-thread:make-mutex)))
+
+    (loop for i from 2 to 13 do
+          (day10-part2-doit (elt machines i) i mutex total)))
+  )
+;(day10-part2)
+; the above works for some of them, but not all.
+; some computed so far (in an earlier run with much slower times):
+;finished i=0, m=5292982962, t=49.6777s, l=42 t=409
+;finished i=1, m=66848273, t=22.6925s, l=53 t=513
+;finished i=14, m=89590688, t=6.7168s, l=62 t=200
+;finished i=42, m=163511714, t=24.2562s, l=67 t=267
+;finished i=43, m=4413661, t=2.5843s, l=54 t=321
+;finished i=44, m=33165688, t=4.5456s, l=46 t=367
+;finished i=77, m=386833530, t=378.4327s, l=39 t=552
+;finished i=91, m=440763, t=0.0002s, l=31 t=52
+;finished i=97, m=5120305546, t=887.6441s, l=77 t=629
+;finished i=103, m=62496179970, t=63.5664s, l=51 t=460
+;finished i=109, m=24140808, t=0.0221s, l=21 t=73
+;finished i=115, m=461575, t=0.0007s, l=21 t=21
+;finished i=116, m=9380582, t=0.0921s, l=50 t=123
+;finished i=117, m=766204, t=0.0010s, l=15 t=138
+;finished i=145, m=616977517, t=2513.1089s, l=55 t=842
+;finished i=151, m=65970961719258, t=1631.8717s, l=158 t=787
+;finished i=156, m=721696781, t=63.1545s, l=50 t=50
+
+;;;; day 11
+
+;; part 1
+
+(defun input-to-graph (input)
+  (let ((graph (make-hash-table)))
+    (loop for line in (puzzle-lines input)
+          do
+          (let* ((node-edges (cl-ppcre:split ": " line))
+                 (node (intern (string-upcase (first node-edges)) :keyword))
+                 (edges (map 'vector (lambda (edge) (intern (string-upcase edge) :keyword)) (cl-ppcre:split " " (second node-edges)))))
+            (setf (gethash node graph) edges)))
+    graph))
+
+(defun paths-to (graph start goal)
+  (let ((frontier (list start))
+        (paths 0))
+    (loop until (null frontier)
+          do
+          (let* ((path-so-far (pop frontier))
+                 (neighbors (gethash path-so-far graph)))
+            (when neighbors
+              (loop for neighbor across neighbors
+                    do
+                    (if (eql goal neighbor)
+                        (incf paths)
+                        (push neighbor frontier))))))
+    paths))
+(paths-to (input-to-graph *day11-input*) :you :out)
+
+;; part 2
+
+;; Currently unsolved, below is WIP.
+
+(defstruct day11-node
+  node
+  seen-fft
+  seen-dac)
+
+(defun has-path-to (graph start goal)
+  "T if there is any path from start to goal in graph"
+  (let ((frontier (list start))
+        (seen (make-hash-table)))
+    (loop until (null frontier)
+          do
+          (let* ((top (pop frontier))
+                 (neighbors (gethash top graph)))
+            (setf (gethash top seen) t)
+            (when neighbors
+              (loop for neighbor across neighbors
+                    do
+                    (when (eql neighbor goal)
+                      (return-from has-path-to t))
+                    (unless (gethash neighbor seen)
+                      (push neighbor frontier))))))))
+
+(defun reachable-graph (graph target)
+  "For every root node in graph, return a map of node -> (has-path-to node target)"
+  (let ((result (make-hash-table)))
+    (loop for node being the hash-keys of graph
+          do
+          (setf (gethash node result) (has-path-to graph node target)))
+    result))
+
+(defun day11-part2 ()
+  (let* ((graph (input-to-graph *day11-input*))
+         (nodes-can-reach-fft (reachable-graph graph :fft))
+         (nodes-can-reach-dac (reachable-graph graph :dac))
+         (start :svr)
+         (goal :out)
+         (computed-all (make-hash-table))
+         (frontier (list (make-day11-node :node start)))
+         (paths 0))
+    (loop until (null frontier)
+          do
+          (let* ((path-so-far (pop frontier))
+                 (neighbors (gethash (day11-node-node path-so-far) graph)))
+            (loop for neighbor across neighbors
+                  do
+                  (let ((new-path (make-day11-node :node neighbor :seen-fft (day11-node-seen-fft path-so-far) :seen-dac (day11-node-seen-dac path-so-far))))
+                    (when (eql :fft neighbor)
+                      (setf (day11-node-seen-fft new-path) t))
+                    (when (eql :dac neighbor)
+                      (setf (day11-node-seen-dac new-path) t))
+                    ;(format t "new-path ~a, can-fft ~a, can-dac ~a~%" new-path (gethash neighbor nodes-can-reach-fft) (gethash neighbor nodes-can-reach-dac))
+
+                    (if (and (day11-node-seen-fft new-path) (day11-node-seen-dac new-path))
+                        (progn (unless (gethash neighbor computed-all)
+                                 (setf (gethash neighbor computed-all) (paths-to graph neighbor goal)))
+                               (incf paths (gethash neighbor computed-all)))
+                        (when (not (eql goal neighbor)) (push new-path frontier)))
+                    ;(unless (and (and (not (gethash neighbor nodes-can-reach-fft)) (not (day11-node-seen-fft path-so-far)))
+                    ;             (and (not (gethash neighbor nodes-can-reach-dac)) (not (day11-node-seen-dac path-so-far))))
+                    ;  (if (eql goal neighbor)
+                    ;      (when (and (day11-node-seen-fft new-path) (day11-node-seen-dac new-path))
+                    ;        (incf paths))
+                    ;      (progn
+                    ;        ;(format t "  Adding new-path~%")
+                    ;        (push new-path frontier))))
+                    ))))
+    (format t "paths: ~a~%" paths)
+    paths)
+  )
+

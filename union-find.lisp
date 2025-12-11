@@ -43,7 +43,10 @@
   (let ((parent (uf-parent-lookup uf element)))
     (if (equal parent element)
         element
-        (uf-find uf parent))))
+        (let ((root (uf-find uf parent)))
+          (setf (gethash element (uf-parent-lookup-table uf)) root)
+          root))))
+;        (uf-find uf parent))))
 
 (defmethod uf-union ((uf union-find) set1 set2)
   "Makes set1 and set2 subsets of each other (if not already) by parenting the root
@@ -62,7 +65,9 @@
             root2)
       ; update root2's size to be num elements unioned from root1
       (incf (gethash root2 size-table)
-            (gethash root1 size-table))))
+            (gethash root1 size-table)))
+    ; finally to keep the subtree table entries from being stale and only referring to current roots:
+    (remhash root1 size-table))
   nil)
 
 (defmethod uf-connected ((uf union-find) cmp1 cmp2)
