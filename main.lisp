@@ -824,7 +824,7 @@
 
 ; https://www.thejach.com/view/2011/9/playing_with_morton_numbers
 
-; I asked an AI to help with the morton/inverse morton functions...
+; I asked an AI to help with the morton/inverse morton functions since I didn't want to write them myself...
 
 (defun morton-number (coords)
   "Return the LSB-first Morton number (Z-order curve) for COORDS,
@@ -912,7 +912,7 @@ non-negative integers."
         (machines (get-machines *day10-input*))
         (mutex (sb-thread:make-mutex)))
 
-    (loop for i from 2 to 13 do
+    (loop for i from 3 to 13 do
           (day10-part2-doit (elt machines i) i mutex total)))
   )
 ;(day10-part2)
@@ -920,6 +920,9 @@ non-negative integers."
 ; some computed so far (in an earlier run with much slower times):
 ;finished i=0, m=5292982962, t=49.6777s, l=42 t=409
 ;finished i=1, m=66848273, t=22.6925s, l=53 t=513
+;finished i=3, m=8746934, t=0.0133s, l=44 t=44
+;finished i=4, m=92538015450785, t=27.7701s, l=56 t=100
+;finished i=5, m=57358, t=0.0000s, l=9 t=109
 ;finished i=14, m=89590688, t=6.7168s, l=62 t=200
 ;finished i=42, m=163511714, t=24.2562s, l=67 t=267
 ;finished i=43, m=4413661, t=2.5843s, l=54 t=321
@@ -935,6 +938,123 @@ non-negative integers."
 ;finished i=145, m=616977517, t=2513.1089s, l=55 t=842
 ;finished i=151, m=65970961719258, t=1631.8717s, l=158 t=787
 ;finished i=156, m=721696781, t=63.1545s, l=50 t=50
+
+;; ok scratch all of that... with the hint of "linear programming",
+;; I decided to reformulate this as a .lp file to give to GLPK. (https://www.gnu.org/software/glpk/)
+;; sample:
+;[.##.] (3) (1,3) (2) (2,3) (0,2) (0,1) {3,5,4,7}
+; This can be interpreted as:
+; we have decision variables btn1, btn2, btn3, btn4, btn5, btn6
+; we want to minimize their presses sum
+; the joltages act as constraints: for the first joltage, 3, it is activated by btn5 and btn6 since they both activate slot 0.
+; thus one constraint is for joltage1: btn5 + btn6 = 3.
+; joltage2: btn2 + btn6 = 5
+; joltage3: btn3 + btn4 + btn5 = 4
+; joltage4: btn1 + btn2 + btn4 = 7
+; and these must be integer presses.
+; this translates to a .lp file like:
+#|
+Minimize
+  btn_presses: btn0 + btn1 + btn2 + btn3 + btn4 + btn5
+
+Subject To
+  joltage0: btn4 + btn5 = 3
+  joltage1: btn1 + btn5 = 5
+  joltage2: btn2 + btn3 + btn4 = 4
+  joltage3: btn0 + btn1 + btn3 = 7
+
+Bounds
+  btn0 >= 0
+  btn1 >= 0
+  btn2 >= 0
+  btn3 >= 0
+  btn4 >= 0
+  btn5 >= 0
+
+Generals
+  btn0
+  btn1
+  btn2
+  btn3
+  btn4
+  btn5
+End
+|#
+; so the solution is to take each machine, create a .lp file from it, pass it to `glpsol --cpxlp input.lp -o output.sol`, and read the output file.
+; the output file looks like:
+#|
+Problem:
+Rows:       4
+Columns:    6 (6 integer, 0 binary)
+Non-zeros:  10
+Status:     INTEGER OPTIMAL
+Objective:  btn_presses = 10 (MINimum)
+
+   No.   Row name        Activity     Lower bound   Upper bound
+------ ------------    ------------- ------------- -------------
+     1 joltage0                    3             3             =
+     2 joltage1                    5             5             =
+     3 joltage2                    4             4             =
+     4 joltage3                    7             7             =
+
+   No. Column name       Activity     Lower bound   Upper bound
+------ ------------    ------------- ------------- -------------
+     1 btn0         *              1             0
+     2 btn1         *              5             0
+     3 btn2         *              0             0
+     4 btn3         *              1             0
+     5 btn4         *              3             0
+     6 btn5         *              0             0
+
+Integer feasibility conditions:
+
+KKT.PE: max.abs.err = 0.00e+00 on row 0
+        max.rel.err = 0.00e+00 on row 0
+        High quality
+
+KKT.PB: max.abs.err = 0.00e+00 on row 0
+        max.rel.err = 0.00e+00 on row 0
+        High quality
+
+End of output
+|#
+; So we can just read it and grep out the btn_presses = 10 part.
+
+(defun create-machine-lp-file (machine path)
+  (with-open-file (file path :direction :output :if-exists :supersede)
+    (format file "Minimize~%")
+    (format file "  btn_presses: ")
+    (format file "~{btn~a~^ + ~}" (loop for btn-id below (length (factory-machine-buttons machine)) collect btn-id))
+    (format file "~%~%Subject To~%")
+    (loop for joltage across (factory-machine-joltages machine)
+          for joltage-id from 0
+          do
+          (format file "  joltage~a: ~{btn~a~^ + ~} = ~a~%"
+                  joltage-id
+                  (loop for button across (factory-machine-buttons machine)
+                        for button-id from 0
+                        for button-activates-joltage? = (find joltage-id button)
+                        when button-activates-joltage?
+                        collect button-id)
+                  joltage))
+    (format file "~%Bounds~%")
+    (format file "~{  btn~a >= 0~%~}" (loop for btn-id below (length (factory-machine-buttons machine)) collect btn-id))
+    (format file "~%Generals~%")
+    (format file "~{  btn~a~%~}" (loop for btn-id below (length (factory-machine-buttons machine)) collect btn-id))
+    (format file "End~%")))
+;(create-machine-lp-file (first (get-machines *day10-sample*)) "/tmp/m1.lp")
+
+(defun solve-machine (machine &optional (lp-file "/tmp/machine.lp") (sol-file "/tmp/machine.sol"))
+  (create-machine-lp-file machine lp-file)
+  (uiop:run-program (list "glpsol" "--cpxlp" lp-file "-o" sol-file))
+  (parse-integer (aref (second (multiple-value-list (cl-ppcre:scan-to-strings "Objective:\\s+btn_presses = (\\d+)" (uiop:read-file-string sol-file)))) 0)))
+
+;(solve-machine (first (get-machines *day10-sample*)))
+(defun day10-part2 ()
+(loop for machine in (get-machines *day10-input*)
+      sum (solve-machine machine))
+)
+
 
 ;;;; day 11
 
@@ -992,3 +1112,68 @@ non-negative integers."
        (paths-to-memoized graph :fft :dac)
        (paths-to-memoized graph :dac :out))))
 (day11-part2)
+
+
+;;;; day 12
+
+;; part 1
+
+; Not sure how to even approach this... but going to try something stupid and just sum up the areas of required shapes and compare to the area of the grid they should fit in.
+
+(puzzle-lines *day12-sample*)
+
+(defun calc-shape-area (text-shape)
+  (loop for line in (cl-ppcre:split "\\n" text-shape)
+        sum (loop for char across line
+                  when (eql #\# char)
+                  count 1)))
+
+(defun id-shape-to-shape (id-shape)
+  "Given shape that contains an id, newline, then a shape, returns just the shape in a better format."
+  (let* ((shape (make-hash-table))
+         (text-shape (str:join #\newline (serapeum:drop 1 (cl-ppcre:split "\\n" id-shape)))))
+    (setf (gethash :text shape) text-shape)
+    (setf (gethash :area shape) (calc-shape-area text-shape))
+    shape))
+
+(defun make-areas (areas-lines)
+  (map 'vector
+       (lambda (line)
+         (let* ((size-reqs (cl-ppcre:split ": " line))
+                (w-l (mapcar #'parse-integer (cl-ppcre:split "x" (first size-reqs))))
+                (reqs (map 'vector #'parse-integer (cl-ppcre:split " " (second size-reqs))))
+                (total-area (* (first w-l) (second w-l)))
+                (area (make-hash-table)))
+           (setf (gethash :total-area area) total-area
+                 (gethash :width area) (first w-l)
+                 (gethash :length area) (second w-l)
+                 (gethash :required-shapes area) reqs)
+           area))
+       (cl-ppcre:split "\\n" areas-lines)))
+
+(defun day12 ()
+
+(let* ((lines (mapcar #'str:trim (cl-ppcre:split "\\n\\n" *day12-input*)))
+       (shapes (make-array 5 :adjustable t :fill-pointer 0))
+       (areas nil)
+       (fits 0))
+  (loop for line in lines
+        do
+        (if (= 1 (cl-ppcre:count-matches "^\\d:" line)) ; shape
+            (vector-push-extend (id-shape-to-shape line) shapes)
+            (setf areas (make-areas line))))
+  (loop for area across areas
+        for id from 0
+        do
+        (let* ((required-area (loop for required-amount across (gethash :required-shapes area)
+                                    for req-id from 0
+                                    for shape = (aref shapes req-id)
+                                    sum (* required-amount (gethash :area shape))))
+               (available-area (gethash :total-area area))
+               (diff (- available-area required-area)))
+          (when (plusp diff)
+            (incf fits)
+            (format t "Area ~a: Available area: ~a. Required area: ~a. Difference: ~a.~%" id available-area required-area (- available-area required-area)))))
+  ; it works LOL
+  fits)
+)
